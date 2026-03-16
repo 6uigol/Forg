@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "gui.lima3009@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+    
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'role']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 150 &&
+             data.role in ['user', 'admin'];
+    }
+    
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'description', 'price', 'stock', 'category', 'images', 'status']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 150 &&
+             data.description is string && data.description.size() < 5000 &&
+             data.price is number && data.price >= 0 &&
+             data.stock is number && data.stock >= 0 &&
+             data.category is string && data.category.size() > 0 && data.category.size() < 100 &&
+             data.images is list && data.images.size() <= 10 &&
+             data.status in ['ativo', 'inativo', 'fora_de_estoque'];
+    }
+    
+    function isValidOrder(data) {
+      return data.keys().hasAll(['userId', 'items', 'total', 'status', 'createdAt']) &&
+             data.userId is string && data.userId.size() > 0 && data.userId.size() < 100 &&
+             data.items is list && data.items.size() > 0 && data.items.size() <= 100 &&
+             data.total is number && data.total >= 0 &&
+             data.status in ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidProduct(request.resource.data);
+      allow update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    
+    match /orders/{orderId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId) && isValidOrder(request.resource.data);
+      allow update: if isAdmin() && isValidOrder(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}
